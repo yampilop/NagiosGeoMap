@@ -1,0 +1,115 @@
+<!doctype html>
+
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+
+	<title>Nagios GeoMap</title>
+	<meta name="description" content="NagiosGeoMap">
+	<meta name="author" content="Juan Pablo Martí (yampilop@gmail.com)">
+
+	<style type="text/css">
+		html, body, #map {
+			width: 100%;
+			height: 100%;
+			margin: 0;
+		}
+	</style>
+	<script src="js/jquery.min.js"></script>
+	<script src="js/OpenLayers.js"></script>
+	<script>
+		// Function to create OpenLayers.LonLat object transformed with EPSG:4326 projection
+		function coordinates(lat, lon, map) {
+			return new OpenLayers.LonLat(lon,lat).transform(
+				new OpenLayers.Projection("EPSG:4326"),
+				map.getProjectionObject()
+			)
+		}
+		
+		// Function to create marker for host
+		function hostMarker(lat, lon, map, icon) {
+			return new OpenLayers.Marker(
+				coordinates(lat, lon, map),
+				new OpenLayers.Icon(
+					icon, 
+					new OpenLayers.Size(100,50), 
+					new OpenLayers.Pixel(-50, -30)
+				)
+			);
+		}
+		
+		// Function to compare points by number of elements, used to sort
+		function compare(a,b) {
+			if (a.elements < b.elements)
+				return -1;
+			if (a.elements > b.elements)
+				return 1;
+			return 0;
+		}
+		
+		$(document).ready(function () {
+			// Map, controls and basic layer
+			var map = new OpenLayers.Map("map");
+			var osm = new OpenLayers.Layer.OSM();
+			map.addLayer(osm);
+			map.addControl(new OpenLayers.Control.LayerSwitcher(true));
+			map.addControl(new OpenLayers.Control.ScaleLine());
+			
+			// TODO: Set autocenter based on markers. Now it's centered on Argentina
+			map.setCenter(coordinates(-33.370664, -63.493339, map), 6);
+			
+			// Markers layer
+			var markers = new OpenLayers.Layer.Markers( "Markers" );
+			map.addLayer(markers);
+			
+			var points = [];
+			
+			// Get hosts and parameters from objectjson.cgi
+			$.getJSON('/nagios/cgi-bin/objectjson.cgi?query=hostlist&details=true', function(data) {
+				$.each(data.data.hostlist, function(host, content) {
+					// Just draw hosts with valid _lat and _long parameters
+					if ( (content.custom_variables.LAT != null) && (content.custom_variables.LONG != null) ) {
+						var exists = false;
+						// Iterate points to verify multi-host points
+						$.each(points, function(index, point) {
+							if ( (point.lat == content.custom_variables.LAT) && (point.long == content.custom_variables.LONG) ) {
+								exists = true;
+								// Don't repeat icons
+								if (points[index].icons.indexOf(content.icon_image) == -1) {
+									points[index].icons += ","+content.icon_image;
+								}
+								points[index].elements++;
+								points[index].hostname = points[index].elements+" hosts";
+								return false;
+							}
+						});
+						// Create points that doesn't exist
+						if (exists == false) {
+							points.push({
+								lat: content.custom_variables.LAT, 
+								long: content.custom_variables.LONG,
+								icons: content.icon_image,
+								hostname: host,
+								elements: 1
+							});
+						}
+					}
+				});
+				
+				// Order by number of elements
+				points.sort(compare);
+				
+				// Add marker for each point
+				$.each(points, function(index, point) {
+					iconURL = 'icon.php?icon='+point.icons+'&label='+point.hostname;
+					markers.addMarker(hostMarker(point.lat, point.long, map, iconURL));
+				});
+			});
+		});
+	</script>
+</head>
+
+<body>
+	<div id="map"></div>
+</body>
+</html>
